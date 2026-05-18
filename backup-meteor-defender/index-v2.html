@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Meteor Defender</title>
+  <style>
+    /* Estilos básicos de la página */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: radial-gradient(circle at top, #222 0, #000 60%);
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Contenedor del juego */
+    #game-container {
+      position: relative;
+      width: 800px;
+      height: 600px;
+      border: 2px solid #555;
+      background: #000;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+      overflow: hidden;
+    }
+
+    /* Canvas donde se dibuja el juego */
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at top, #111 0, #000 70%);
+    }
+
+    /* HUD de puntuación y vidas */
+    #hud {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 18px;
+      text-shadow: 0 0 4px #000;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* Capas de texto para pantallas de inicio, pausa y fin */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 20px;
+      background: radial-gradient(circle at center, rgba(0, 0, 0, 0.8) 0, rgba(0, 0, 0, 0.95) 60%);
+      color: #fff;
+      z-index: 10;
+    }
+
+    .overlay h1 {
+      font-size: 48px;
+      margin-bottom: 16px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px #0ff;
+    }
+
+    .overlay h2 {
+      font-size: 32px;
+      margin-bottom: 12px;
+      text-shadow: 0 0 10px #f33;
+    }
+
+    .overlay p {
+      font-size: 18px;
+      margin-bottom: 8px;
+      max-width: 600px;
+    }
+
+    .overlay .controls {
+      margin-top: 12px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .overlay .hint {
+      margin-top: 20px;
+      font-size: 20px;
+      color: #0ff;
+      text-shadow: 0 0 8px #0ff;
+    }
+
+    /* Texto resaltado para puntuación final */
+    .final-score {
+      font-size: 24px;
+      margin-top: 10px;
+      color: #ffd700;
+      text-shadow: 0 0 8px #ffd700;
+    }
+
+    /* Lista de opciones en el menú de pausa */
+    .pause-options {
+      margin-top: 16px;
+      font-size: 18px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <!-- HUD con puntuación y vidas -->
+    <div id="hud">
+      <div>Puntuación: <span id="score">0</span></div>
+      <div>Vidas: <span id="lives">3</span></div>
+    </div>
+
+    <!-- Canvas principal del juego -->
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <!-- Pantalla de inicio -->
+    <div id="start-screen" class="overlay">
+      <h1>Meteor Defender</h1>
+      <p>Defiende la Tierra destruyendo los meteoritos que caen del cielo.</p>
+      <p>Sobrevive el mayor tiempo posible y consigue la máxima puntuación.</p>
+      <div class="controls">
+        <p><strong>Controles:</strong></p>
+        <p>Flecha izquierda o tecla A: mover a la izquierda</p>
+        <p>Flecha derecha o tecla D: mover a la derecha</p>
+        <p>Barra espaciadora: disparar</p>
+        <p>Enter: empezar la partida</p>
+        <p>Esc: pausar / reanudar</p>
+      </div>
+      <div class="hint">Pulsa Enter para empezar</div>
+    </div>
+
+    <!-- Pantalla de pausa -->
+    <div id="pause-screen" class="overlay" style="display: none;">
+      <h2>Pausa</h2>
+      <p>El juego está en pausa.</p>
+      <div class="pause-options">
+        <p>Esc: continuar</p>
+        <p>R: reiniciar partida</p>
+        <p>H: volver a la pantalla de inicio</p>
+      </div>
+      <div class="hint">Pulsa una tecla para elegir una opción</div>
+    </div>
+
+    <!-- Pantalla de fin de juego -->
+    <div id="gameover-screen" class="overlay" style="display: none;">
+      <h2>Game Over</h2>
+      <p>La Tierra ha sido golpeada, pero puedes intentarlo de nuevo.</p>
+      <div class="final-score">Puntuación final: <span id="final-score">0</span></div>
+      <div class="hint">Pulsa Enter para reiniciar</div>
+    </div>
+  </div>
+
+  <script>
+    // ==========================
+    // Variables principales
+    // ==========================
+
+    // Referencias al canvas y contexto
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // HUD y pantallas
+    const scoreSpan = document.getElementById("score");
+    const livesSpan = document.getElementById("lives");
+    const startScreen = document.getElementById("start-screen");
+    const pauseScreen = document.getElementById("pause-screen");
+    const gameOverScreen = document.getElementById("gameover-screen");
+    const finalScoreSpan = document.getElementById("final-score");
+
+    // Estados del juego: "start", "playing", "paused", "gameover"
+    let gameState = "start";
+
+    // Datos del jugador
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height - 60,
+      width: 50,
+      height: 20,
+      speed: 6
+    };
+
+    // Arrays para meteoritos y disparos
+    let meteors = [];
+    let bullets = [];
+
+    // Puntuación y vidas
+    let score = 0;
+    let lives = 3;
+
+    // Control de dificultad
+    let meteorSpawnInterval = 1200; // milisegundos entre meteoritos al inicio (más fácil)
+    let lastMeteorSpawn = 0;
+    let gameStartTime = 0; // para aumentar dificultad con el tiempo
+
+    // Control de disparo
+    let canShoot = true;
+    const shootCooldown = 200; // milisegundos entre disparos
+
+    // Teclas pulsadas
+    const keys = {
+      left: false,
+      right: false,
+      shoot: false
+    };
+
+    // ==========================
+    // Gestión de entrada (teclado)
+    // ==========================
+
+    // Escuchar cuando se pulsa una tecla
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "ArrowLeft" || e.code === "KeyA") {
+        keys.left = true;
+      }
+      if (e.code === "ArrowRight" || e.code === "KeyD") {
+        keys.right = true;
+      }
+      if (e.code === "Space") {
+        keys.shoot = true;
+        // Evitar scroll con barra espaciadora
+        e.preventDefault();
+      }
+
+      // Enter para empezar o reiniciar
+      if (e.code === "Enter") {
+        if (gameState === "start") {
+          startGame();
+        } else if (gameState === "gameover") {
+          restartGame();
+        }
+      }
+
+      // Esc para pausar / reanudar
+      if (e.code === "Escape") {
+        if (gameState === "playing") {
+          pauseGame();
+        } else if (gameState === "paused") {
+          resumeGame();
+        }
+      }
+
+      // Atajos en el menú de pausa
+      if (gameState === "paused") {
+        if (e.code === "KeyR") {
+          // Reiniciar partida
+          restartGame();
+        }
+        if (e.code === "KeyH") {
+          // Volver a la pantalla de inicio
+          goToStartScreen();
+        }
+      }
+    });
+
+    // Escuchar cuando se suelta una tecla
+    window.addEventListener("keyup", (e) => {
+      if (e.code === "ArrowLeft" || e.code === "KeyA") {
+        keys.left = false;
+      }
+      if (e.code === "ArrowRight" || e.code === "KeyD") {
+        keys.right = false;
+      }
+      if (e.code === "Space") {
+        keys.shoot = false;
+      }
+    });
+
+    // ==========================
+    // Funciones de control del juego
+    // ==========================
+
+    // Inicia una nueva partida desde la pantalla de inicio
+    function startGame() {
+      resetGame();
+      gameState = "playing";
+      startScreen.style.display = "none";
+      pauseScreen.style.display = "none";
+      gameOverScreen.style.display = "none";
+      gameStartTime = performance.now();
+      lastMeteorSpawn = performance.now();
+    }
+
+    // Reinicia la partida desde Game Over o desde pausa
+    function restartGame() {
+      resetGame();
+      gameState = "playing";
+      startScreen.style.display = "none";
+      pauseScreen.style.display = "none";
+      gameOverScreen.style.display = "none";
+      gameStartTime = performance.now();
+      lastMeteorSpawn = performance.now();
+    }
+
+    // Volver a la pantalla de inicio desde pausa
+    function goToStartScreen() {
+      resetGame();
+      gameState = "start";
+      startScreen.style.display = "flex";
+      pauseScreen.style.display = "none";
+      gameOverScreen.style.display = "none";
+    }
+
+    // Poner el juego en pausa
+    function pauseGame() {
+      gameState = "paused";
+      pauseScreen.style.display = "flex";
+    }
+
+    // Reanudar el juego desde pausa
+    function resumeGame() {
+      gameState = "playing";
+      pauseScreen.style.display = "none";
+      // Ajustar tiempos para que la dificultad no salte bruscamente
+      const now = performance.now();
+      gameStartTime += now - lastTime;
+      lastMeteorSpawn = now;
+    }
+
+    // Restablece variables a su estado inicial
+    function resetGame() {
+      score = 0;
+      lives = 3;
+      meteors = [];
+      bullets = [];
+      player.x = canvas.width / 2;
+      meteorSpawnInterval = 1200; // reiniciar dificultad (más suave)
+      updateHUD();
+    }
+
+    // Actualiza el HUD de puntuación y vidas
+    function updateHUD() {
+      scoreSpan.textContent = score;
+      livesSpan.textContent = lives;
+    }
+
+    // Termina la partida y muestra la pantalla de Game Over
+    function gameOver() {
+      gameState = "gameover";
+      finalScoreSpan.textContent = score;
+      gameOverScreen.style.display = "flex";
+      pauseScreen.style.display = "none";
+    }
+
+    // ==========================
+    // Lógica del juego
+    // ==========================
+
+    // Crea un nuevo meteorito en una posición aleatoria arriba
+    function spawnMeteor() {
+      const meteorWidth = 30 + Math.random() * 20;
+      const meteorHeight = meteorWidth;
+      const x = Math.random() * (canvas.width - meteorWidth);
+      const y = -meteorHeight;
+      // Velocidad vertical más lenta para que sea más jugable
+      const speed = 1.2 + Math.random() * 1.3;
+
+      meteors.push({
+        x,
+        y,
+        width: meteorWidth,
+        height: meteorHeight,
+        speed
+      });
+    }
+
+    // Crea un nuevo disparo desde la nave
+    function shoot() {
+      if (!canShoot) return;
+      canShoot = false;
+
+      // Disparo centrado en la nave
+      bullets.push({
+        x: player.x + player.width / 2 - 3,
+        y: player.y,
+        width: 6,
+        height: 14,
+        speed: 8
+      });
+
+      // Reactivar disparo tras el cooldown
+      setTimeout(() => {
+        canShoot = true;
+      }, shootCooldown);
+    }
+
+    // Detecta colisión simple entre dos rectángulos
+    function isColliding(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    // Actualiza la dificultad con el tiempo
+    function updateDifficulty(currentTime) {
+      // Tiempo transcurrido en segundos
+      const elapsed = (currentTime - gameStartTime) / 1000;
+
+      // Reducir el intervalo de aparición de meteoritos poco a poco
+      // Nunca menos de 500 ms para mantenerlo jugable
+      const minInterval = 500;
+      const maxInterval = 1200;
+      const difficultyFactor = Math.min(elapsed / 60, 1); // en 60s llega a máxima dificultad
+
+      meteorSpawnInterval = maxInterval - (maxInterval - minInterval) * difficultyFactor;
+    }
+
+    // ==========================
+    // Bucle principal del juego
+    // ==========================
+
+    let lastTime = 0;
+
+    function gameLoop(timestamp) {
+      // Calcular delta de tiempo
+      const delta = timestamp - lastTime;
+      lastTime = timestamp;
+
+      // Limpiar el canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Dibujar fondo de estrellas sencillo
+      drawStarBackground();
+
+      if (gameState === "playing") {
+        // Actualizar dificultad
+        updateDifficulty(timestamp);
+
+        // Actualizar jugador
+        updatePlayer();
+
+        // Gestionar disparo
+        if (keys.shoot) {
+          shoot();
+        }
+
+        // Actualizar meteoritos y disparos
+        updateMeteors(delta);
+        updateBullets(delta);
+
+        // Comprobar colisiones
+        checkCollisions();
+
+        // Dibujar todos los elementos
+        drawPlayer();
+        drawMeteors();
+        drawBullets();
+
+        // Actualizar HUD
+        updateHUD();
+      } else if (gameState === "start") {
+        // En la pantalla de inicio solo dibujamos un jugador de adorno
+        drawPlayer();
+      } else if (gameState === "paused") {
+        // En pausa, dibujamos la escena congelada
+        drawPlayer();
+        drawMeteors();
+        drawBullets();
+      } else if (gameState === "gameover") {
+        // En Game Over dejamos la última escena dibujada
+        drawPlayer();
+        drawMeteors();
+        drawBullets();
+      }
+
+      // Seguir el bucle
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ==========================
+    // Actualización de entidades
+    // ==========================
+
+    function updatePlayer() {
+      // Mover a la izquierda
+      if (keys.left) {
+        player.x -= player.speed;
+      }
+      // Mover a la derecha
+      if (keys.right) {
+        player.x += player.speed;
+      }
+
+      // Limitar al área del canvas
+      if (player.x < 0) player.x = 0;
+      if (player.x + player.width > canvas.width) {
+        player.x = canvas.width - player.width;
+      }
+    }
+
+    function updateMeteors(delta) {
+      const currentTime = performance.now();
+
+      // Crear nuevos meteoritos según el intervalo
+      if (currentTime - lastMeteorSpawn > meteorSpawnInterval) {
+        spawnMeteor();
+        lastMeteorSpawn = currentTime;
+      }
+
+      // Mover meteoritos hacia abajo
+      for (let i = meteors.length - 1; i >= 0; i--) {
+        const m = meteors[i];
+        m.y += m.speed;
+
+        // Si el meteorito sale por abajo, se elimina sin quitar vida
+        if (m.y > canvas.height) {
+          meteors.splice(i, 1);
+        }
+      }
+    }
+
+    function updateBullets(delta) {
+      // Mover disparos hacia arriba
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.y -= b.speed;
+
+        // Si el disparo sale por arriba, se elimina
+        if (b.y + b.height < 0) {
+          bullets.splice(i, 1);
+        }
+      }
+    }
+
+    // ==========================
+    // Colisiones
+    // ==========================
+
+    function checkCollisions() {
+      // Colisión disparo-meteorito
+      for (let i = meteors.length - 1; i >= 0; i--) {
+        const m = meteors[i];
+
+        for (let j = bullets.length - 1; j >= 0; j--) {
+          const b = bullets[j];
+
+          if (isColliding(m, b)) {
+            // Eliminar meteorito y disparo
+            meteors.splice(i, 1);
+            bullets.splice(j, 1);
+
+            // Sumar puntos
+            score += 10;
+            break;
+          }
+        }
+      }
+
+      // Colisión meteorito-jugador
+      for (let i = meteors.length - 1; i >= 0; i--) {
+        const m = meteors[i];
+
+        if (isColliding(m, player)) {
+          // Eliminar meteorito
+          meteors.splice(i, 1);
+
+          // Quitar una vida
+          lives--;
+
+          // Si no quedan vidas, terminar partida
+          if (lives <= 0) {
+            lives = 0;
+            updateHUD();
+            gameOver();
+            return;
+          }
+        }
+      }
+    }
+
+    // ==========================
+    // Dibujado
+    // ==========================
+
+    // Fondo de estrellas sencillo
+    function drawStarBackground() {
+      // Pequeños puntos blancos aleatorios (pseudo-aleatorio por frame)
+      ctx.fillStyle = "#fff";
+      for (let i = 0; i < 40; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const size = Math.random() * 2;
+        ctx.globalAlpha = Math.random();
+        ctx.fillRect(x, y, size, size);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Dibujar la nave del jugador
+    function drawPlayer() {
+      // Cuerpo principal de la nave
+      ctx.fillStyle = "#3cf";
+      ctx.fillRect(player.x, player.y, player.width, player.height);
+
+      // Cabina
+      ctx.fillStyle = "#9ff";
+      ctx.fillRect(player.x + player.width / 4, player.y - 8, player.width / 2, 8);
+
+      // Detalles laterales
+      ctx.fillStyle = "#0af";
+      ctx.fillRect(player.x - 6, player.y + 4, 6, 12);
+      ctx.fillRect(player.x + player.width, player.y + 4, 6, 12);
+    }
+
+    // Dibujar meteoritos
+    function drawMeteors() {
+      for (const m of meteors) {
+        // Círculo simple para el meteorito
+        const centerX = m.x + m.width / 2;
+        const centerY = m.y + m.height / 2;
+        const radius = m.width / 2;
+
+        const gradient = ctx.createRadialGradient(
+          centerX - radius / 3,
+          centerY - radius / 3,
+          radius / 4,
+          centerX,
+          centerY,
+          radius
+        );
+        gradient.addColorStop(0, "#ffddaa");
+        gradient.addColorStop(0.4, "#d08030");
+        gradient.addColorStop(1, "#5a2a10");
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Dibujar disparos
+    function drawBullets() {
+      for (const b of bullets) {
+        const gradient = ctx.createLinearGradient(
+          b.x,
+          b.y + b.height,
+          b.x,
+          b.y
+        );
+        gradient.addColorStop(0, "#0ff");
+        gradient.addColorStop(1, "#fff");
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(b.x, b.y, b.width, b.height);
+      }
+    }
+
+    // ==========================
+    // Inicio del bucle
+    // ==========================
+
+    // Comenzar el bucle de animación
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

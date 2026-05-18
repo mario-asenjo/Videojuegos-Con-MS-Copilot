@@ -10,6 +10,7 @@ Requisitos importantes:
 - Debe incluir pantalla de inicio, juego, pantalla de fin y botón de reinicio.
 - Debe funcionar con teclado.
 - Prioriza que sea estable y jugable antes que complejo.
+- Debes proveer el archivo para descargarlo directamente, no mostrar el código en la respuesta.
 
 Aquí tienes el documento de diseño:
 [PEGAR MARKDOWN PASO 1 AQUÍ]

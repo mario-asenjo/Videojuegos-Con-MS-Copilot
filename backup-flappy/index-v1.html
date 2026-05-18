@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Flappy Copilot</title>
+  <style>
+    /* Estilos básicos de la página */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #87cefa; /* Fondo azul claro */
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      color: #ffffff;
+    }
+
+    /* Contenedor principal del juego */
+    #game-container {
+      position: relative;
+      width: 480px;
+      height: 640px;
+      background: #87cefa;
+      border: 4px solid #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    /* Lienzo del juego */
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: #87cefa;
+    }
+
+    /* Capas de interfaz (pantalla de inicio, fin, etc.) */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.4);
+      color: #ffffff;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .title {
+      font-size: 40px;
+      font-weight: 800;
+      margin-bottom: 16px;
+      text-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+    }
+
+    .subtitle {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+
+    .info {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    .big-text {
+      font-size: 24px;
+      font-weight: 700;
+      margin-top: 12px;
+    }
+
+    .button-hint {
+      margin-top: 10px;
+      font-size: 16px;
+      opacity: 0.9;
+    }
+
+    /* Marcador en la parte superior */
+    #hud {
+      position: absolute;
+      top: 8px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      font-size: 28px;
+      font-weight: 700;
+      text-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+    }
+
+    /* Texto pequeño en la esquina inferior */
+    #footer-hint {
+      position: absolute;
+      bottom: 6px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 12px;
+      color: #e0f7ff;
+      text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <!-- Lienzo donde se dibuja el juego -->
+    <canvas id="gameCanvas" width="480" height="640"></canvas>
+
+    <!-- HUD de puntuación -->
+    <div id="hud">0</div>
+
+    <!-- Pantalla de inicio -->
+    <div id="start-screen" class="overlay">
+      <div class="title">Flappy Copilot</div>
+      <div class="subtitle">Arcade 2D de reflejos</div>
+      <div class="info">Controles:</div>
+      <div class="info">Barra espaciadora → saltar</div>
+      <div class="info">Enter ↵ → iniciar</div>
+      <div class="big-text">Pulsa Enter para empezar</div>
+      <div class="button-hint">(También puedes usar Espacio para probar el salto durante la partida)</div>
+    </div>
+
+    <!-- Pantalla de fin de partida -->
+    <div id="gameover-screen" class="overlay hidden">
+      <div class="title">Fin de la partida</div>
+      <div id="final-score" class="big-text">Puntuación: 0</div>
+      <div id="best-score" class="info">Mejor puntuación: 0</div>
+      <div class="big-text">Pulsa Enter para reiniciar</div>
+      <div class="button-hint">O pulsa Espacio para volver a intentarlo</div>
+    </div>
+
+    <!-- Texto de ayuda inferior -->
+    <div id="footer-hint">Flappy Copilot · HTML, CSS y JavaScript puro</div>
+  </div>
+
+  <script>
+    // -----------------------------
+    // Configuración básica del juego
+    // -----------------------------
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const startScreen = document.getElementById("start-screen");
+    const gameOverScreen = document.getElementById("gameover-screen");
+    const hud = document.getElementById("hud");
+    const finalScoreLabel = document.getElementById("final-score");
+    const bestScoreLabel = document.getElementById("best-score");
+
+    // Estados del juego
+    const STATE_START = "start";
+    const STATE_PLAYING = "playing";
+    const STATE_GAMEOVER = "gameover";
+
+    let gameState = STATE_START;
+
+    // Dimensiones del mundo
+    const WIDTH = canvas.width;
+    const HEIGHT = canvas.height;
+
+    // Suelo
+    const groundHeight = 80;
+
+    // Personaje (pájaro/robot)
+    const player = {
+      x: 120,
+      y: HEIGHT / 2,
+      radius: 18,
+      vy: 0,
+      gravity: 0.45, // gravedad
+      jumpStrength: -7.5 // fuerza del salto
+    };
+
+    // Tuberías
+    const pipes = [];
+    const pipeWidth = 70;
+    const pipeGapBase = 150; // hueco inicial
+    let pipeGap = pipeGapBase;
+    let pipeSpeed = 2.4;
+    let pipeSpawnInterval = 1500; // ms entre tuberías
+    let lastPipeTime = 0;
+
+    // Puntuación
+    let score = 0;
+    let bestScore = 0;
+
+    // Control de tiempo
+    let lastTime = 0;
+
+    // Para suavizar la dificultad
+    const difficultyIncreaseInterval = 5000; // cada 5 segundos
+    let lastDifficultyIncrease = 0;
+
+    // -----------------------------
+    // Funciones de utilidad
+    // -----------------------------
+
+    // Reinicia todos los valores para una nueva partida
+    function resetGame() {
+      player.y = HEIGHT / 2;
+      player.vy = 0;
+
+      pipes.length = 0;
+      score = 0;
+      hud.textContent = "0";
+
+      pipeGap = pipeGapBase;
+      pipeSpeed = 2.4;
+      pipeSpawnInterval = 1500;
+      lastPipeTime = 0;
+      lastDifficultyIncrease = 0;
+    }
+
+    // Cambia el estado del juego y muestra/oculta pantallas
+    function setGameState(state) {
+      gameState = state;
+
+      if (state === STATE_START) {
+        startScreen.classList.remove("hidden");
+        gameOverScreen.classList.add("hidden");
+      } else if (state === STATE_PLAYING) {
+        startScreen.classList.add("hidden");
+        gameOverScreen.classList.add("hidden");
+      } else if (state === STATE_GAMEOVER) {
+        startScreen.classList.add("hidden");
+        gameOverScreen.classList.remove("hidden");
+      }
+    }
+
+    // -----------------------------
+    // Entrada de teclado
+    // -----------------------------
+
+    // Maneja las teclas pulsadas
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Enter") {
+        // Enter para iniciar o reiniciar
+        if (gameState === STATE_START) {
+          resetGame();
+          setGameState(STATE_PLAYING);
+        } else if (gameState === STATE_GAMEOVER) {
+          resetGame();
+          setGameState(STATE_PLAYING);
+        }
+      } else if (e.code === "Space") {
+        // Espacio para saltar
+        e.preventDefault(); // evita scroll en algunos navegadores
+        if (gameState === STATE_PLAYING) {
+          player.vy = player.jumpStrength;
+        } else if (gameState === STATE_START) {
+          // Permite empezar con espacio también
+          resetGame();
+          setGameState(STATE_PLAYING);
+          player.vy = player.jumpStrength;
+        } else if (gameState === STATE_GAMEOVER) {
+          // Reinicio rápido con espacio
+          resetGame();
+          setGameState(STATE_PLAYING);
+          player.vy = player.jumpStrength;
+        }
+      }
+    });
+
+    // -----------------------------
+    // Lógica de tuberías
+    // -----------------------------
+
+    function spawnPipe() {
+      // Altura mínima y máxima del hueco
+      const marginTop = 40;
+      const marginBottom = 40 + groundHeight;
+      const maxGapY = HEIGHT - marginBottom - pipeGap;
+      const minGapY = marginTop;
+
+      // Posición vertical aleatoria del hueco
+      const gapY = Math.random() * (maxGapY - minGapY) + minGapY;
+
+      // Cada tubería es un objeto con la posición del hueco
+      pipes.push({
+        x: WIDTH + pipeWidth,
+        gapY: gapY,
+        passed: false
+      });
+    }
+
+    // -----------------------------
+    // Detección de colisiones
+    // -----------------------------
+
+    function checkCollision() {
+      // Colisión con el suelo
+      if (player.y + player.radius > HEIGHT - groundHeight) {
+        return true;
+      }
+
+      // Colisión con la parte superior de la pantalla
+      if (player.y - player.radius < 0) {
+        return true;
+      }
+
+      // Colisión con tuberías
+      for (let i = 0; i < pipes.length; i++) {
+        const p = pipes[i];
+
+        // Bordes de la tubería
+        const pipeLeft = p.x;
+        const pipeRight = p.x + pipeWidth;
+        const gapTop = p.gapY;
+        const gapBottom = p.gapY + pipeGap;
+
+        // Si el jugador está horizontalmente dentro de la tubería
+        if (player.x + player.radius > pipeLeft && player.x - player.radius < pipeRight) {
+          // Comprueba si está fuera del hueco
+          if (player.y - player.radius < gapTop || player.y + player.radius > gapBottom) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }
+
+    // -----------------------------
+    // Actualización del juego
+    // -----------------------------
+
+    function update(deltaTime) {
+      // deltaTime en segundos
+      const dt = deltaTime / 1000;
+
+      // Actualiza dificultad con el tiempo
+      lastDifficultyIncrease += deltaTime;
+      if (lastDifficultyIncrease > difficultyIncreaseInterval) {
+        lastDifficultyIncrease = 0;
+
+        // Aumenta ligeramente la velocidad y reduce el hueco
+        pipeSpeed += 0.2;
+        pipeGap = Math.max(110, pipeGap - 5);
+        pipeSpawnInterval = Math.max(900, pipeSpawnInterval - 60);
+      }
+
+      // Actualiza jugador (gravedad y movimiento)
+      player.vy += player.gravity;
+      player.y += player.vy;
+
+      // Generación de tuberías
+      lastPipeTime += deltaTime;
+      if (lastPipeTime > pipeSpawnInterval) {
+        lastPipeTime = 0;
+        spawnPipe();
+      }
+
+      // Actualiza tuberías
+      for (let i = pipes.length - 1; i >= 0; i--) {
+        const p = pipes[i];
+        p.x -= pipeSpeed;
+
+        // Suma puntuación cuando el jugador pasa la tubería
+        if (!p.passed && p.x + pipeWidth < player.x) {
+          p.passed = true;
+          score++;
+          hud.textContent = score.toString();
+        }
+
+        // Elimina tuberías que ya no se ven
+        if (p.x + pipeWidth < -50) {
+          pipes.splice(i, 1);
+        }
+      }
+
+      // Comprueba colisiones
+      if (checkCollision()) {
+        // Actualiza mejor puntuación
+        if (score > bestScore) {
+          bestScore = score;
+        }
+        finalScoreLabel.textContent = "Puntuación: " + score;
+        bestScoreLabel.textContent = "Mejor puntuación: " + bestScore;
+        setGameState(STATE_GAMEOVER);
+      }
+    }
+
+    // -----------------------------
+    // Dibujado del juego
+    // -----------------------------
+
+    function drawBackground() {
+      // Cielo
+      ctx.fillStyle = "#87cefa";
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+      // Suelo
+      ctx.fillStyle = "#2e8b57"; // verde
+      ctx.fillRect(0, HEIGHT - groundHeight, WIDTH, groundHeight);
+
+      // Línea de separación del suelo
+      ctx.strokeStyle = "#1f5c3a";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, HEIGHT - groundHeight);
+      ctx.lineTo(WIDTH, HEIGHT - groundHeight);
+      ctx.stroke();
+    }
+
+    function drawPipes() {
+      ctx.fillStyle = "#228b22"; // verde tuberías
+      ctx.strokeStyle = "#145214";
+      ctx.lineWidth = 3;
+
+      pipes.forEach((p) => {
+        const x = p.x;
+        const gapY = p.gapY;
+
+        // Tubería superior
+        const topHeight = gapY;
+        ctx.fillRect(x, 0, pipeWidth, topHeight);
+        ctx.strokeRect(x, 0, pipeWidth, topHeight);
+
+        // Borde inferior de la tubería superior
+        ctx.fillRect(x - 4, topHeight - 20, pipeWidth + 8, 20);
+        ctx.strokeRect(x - 4, topHeight - 20, pipeWidth + 8, 20);
+
+        // Tubería inferior
+        const bottomY = gapY + pipeGap;
+        const bottomHeight = HEIGHT - groundHeight - bottomY;
+        ctx.fillRect(x, bottomY, pipeWidth, bottomHeight);
+        ctx.strokeRect(x, bottomY, pipeWidth, bottomHeight);
+
+        // Borde superior de la tubería inferior
+        ctx.fillRect(x - 4, bottomY, pipeWidth + 8, 20);
+        ctx.strokeRect(x - 4, bottomY, pipeWidth + 8, 20);
+      });
+    }
+
+    function drawPlayer() {
+      // Cuerpo del personaje (círculo)
+      ctx.save();
+      ctx.translate(player.x, player.y);
+
+      // Sombra
+      ctx.beginPath();
+      ctx.arc(4, 4, player.radius, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.fill();
+
+      // Cuerpo principal
+      ctx.beginPath();
+      ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+      const gradient = ctx.createRadialGradient(-6, -6, 4, 0, 0, player.radius);
+      gradient.addColorStop(0, "#ffe066");
+      gradient.addColorStop(1, "#ffb347");
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#cc7a00";
+      ctx.stroke();
+
+      // Ala
+      ctx.beginPath();
+      ctx.ellipse(-6, 2, 10, 6, -0.4, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffd27f";
+      ctx.fill();
+      ctx.strokeStyle = "#cc7a00";
+      ctx.stroke();
+
+      // Ojo
+      ctx.beginPath();
+      ctx.arc(6, -6, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.strokeStyle = "#000000";
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(7, -6, 2, 0, Math.PI * 2);
+      ctx.fillStyle = "#000000";
+      ctx.fill();
+
+      // Pico
+      ctx.beginPath();
+      ctx.moveTo(player.radius - 2, -2);
+      ctx.lineTo(player.radius + 10, 0);
+      ctx.lineTo(player.radius - 2, 2);
+      ctx.closePath();
+      ctx.fillStyle = "#ff8c00";
+      ctx.fill();
+      ctx.strokeStyle = "#cc7000";
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawStartHint() {
+      // Texto flotante en la pantalla de inicio (cuando aún no se ha ocultado)
+      if (gameState === STATE_START) {
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.font = "20px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Pulsa Enter para empezar", WIDTH / 2 + 2, HEIGHT / 2 + 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText("Pulsa Enter para empezar", WIDTH / 2, HEIGHT / 2);
+      }
+    }
+
+    // -----------------------------
+    // Bucle principal del juego
+    // -----------------------------
+
+    function gameLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const deltaTime = timestamp - lastTime;
+      lastTime = timestamp;
+
+      // Limpia y dibuja fondo
+      drawBackground();
+
+      if (gameState === STATE_PLAYING) {
+        // Actualiza lógica solo cuando se está jugando
+        update(deltaTime);
+      }
+
+      // Dibuja tuberías y jugador
+      drawPipes();
+      drawPlayer();
+      drawStartHint();
+
+      // Solicita el siguiente frame
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Inicia el bucle del juego
+    requestAnimationFrame(gameLoop);
+
+    // Estado inicial
+    setGameState(STATE_START);
+  </script>
+</body>
+</html>
